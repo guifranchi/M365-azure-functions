@@ -1,4 +1,4 @@
-name: Build and deploy Python project to Azure Function App - dlp-redact-resend-func
+name: Deploy with Azure CLI
 
 on:
   push:
@@ -8,27 +8,27 @@ on:
 
 env:
   PYTHON_VERSION: '3.12'
+  AZURE_FUNCTIONAPP_NAME: 'dlp-redact-resend-func'
+  AZURE_RESOURCE_GROUP: 'rg-dlp-automation'
 
 jobs:
-  build-and-deploy:
+  deploy:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Python version
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Create clean deployment package
+      - name: Create deployment package
         run: |
-          mkdir deploy
+          mkdir package
           
-          # Create a minimal function_app.py
-          cat > deploy/function_app.py << 'EOF'
+          # Create function_app.py
+          cat > package/function_app.py << 'EOF'
           import azure.functions as func
           import json
           import logging
@@ -38,56 +38,27 @@ jobs:
           @app.route(route="redact_resend")
           async def redact_resend(req: func.HttpRequest) -> func.HttpResponse:
               logging.info('Python HTTP trigger function processed a request.')
-              
-              try:
-                  body = {"status": "resent", "messageId": "dummy-id"}
-                  return func.HttpResponse(
-                      json.dumps(body),
-                      status_code=200,
-                      mimetype="application/json"
-                  )
-              except Exception as e:
-                  logging.error(f"Error: {str(e)}")
-                  return func.HttpResponse(
-                      json.dumps({"error": "Request failed"}),
-                      status_code=500,
-                      mimetype="application/json"
-                  )
+              body = {"status": "resent", "messageId": "dummy-id"}
+              return func.HttpResponse(
+                  json.dumps(body),
+                  status_code=200,
+                  mimetype="application/json"
+              )
           EOF
           
           # Create host.json
-          cat > deploy/host.json << 'EOF'
+          cp host.json package/ || cat > package/host.json << 'EOF'
           {
             "version": "2.0",
-            "logging": {
-              "applicationInsights": {
-                "samplingSettings": {
-                  "isEnabled": true,
-                  "excludedTypes": "Request"
-                }
-              }
-            },
             "extensionBundle": {
               "id": "Microsoft.Azure.Functions.ExtensionBundle",
               "version": "[4.*, 5.0.0)"
-            },
-            "functionTimeout": "00:05:00"
+            }
           }
           EOF
           
           # Create requirements.txt
-          cat > deploy/requirements.txt << 'EOF'
-          azure-functions>=1.18.0
-          EOF
-
-      - name: Debug package
-        run: |
-          echo "=== Package Structure ==="
-          find deploy -type f -exec ls -la {} \;
-          echo "=== function_app.py ==="
-          cat deploy/function_app.py
-          echo "=== host.json ==="
-          cat deploy/host.json
+          echo "azure-functions" > package/requirements.txt
 
       - name: Azure Login
         uses: azure/login@v1
@@ -96,25 +67,14 @@ jobs:
 
       - name: Deploy to Azure Functions
         run: |
-          cd deploy
+          cd package
           zip -r ../deploy.zip .
           cd ..
           
-          # Try to get resource group from az cli
-          RESOURCE_GROUP=$(az functionapp show --name dlp-redact-resend-func --query resourceGroup -o tsv 2>/dev/null || echo "")
-          
-          if [ -n "$RESOURCE_GROUP" ]; then
-            echo "Found resource group: $RESOURCE_GROUP"
-            az functionapp deployment source config-zip \
-              --resource-group "$RESOURCE_GROUP" \
-              --name dlp-redact-resend-func \
-              --src deploy.zip \
-              --verbose
-          else
-            echo "Could not find resource group, trying without it..."
-            az functionapp deployment source config-zip \
-              --name dlp-redact-resend-func \
-              --src deploy.zip \
-              --verbose
-          fi
-          
+          az functionapp deployment source config-zip \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --name ${{ env.AZURE_FUNCTIONAPP_NAME }} \
+            --src deploy.zip \
+            --build-remote false \
+            --verbose
+            
