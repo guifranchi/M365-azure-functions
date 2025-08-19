@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 env:
-  AZURE_FUNCTIONAPP_PACKAGE_PATH: '.'
+  AZURE_FUNCTIONAPP_PACKAGE_PATH: './package'
   PYTHON_VERSION: '3.12'
 
 jobs:
@@ -24,18 +24,51 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Create and start virtual environment
+      - name: Debug - List current directory contents
         run: |
-          python -m venv venv
-          source venv/bin/activate
+          echo "Repository contents:"
+          ls -la
+          echo "Repository structure:"
+          find . -type f -name "*.py" -o -name "*.json" -o -name "*.txt"
 
-      - name: Install dependencies
+      - name: Create package directory
+        run: mkdir -p ./package
+
+      - name: Install dependencies to package directory
         run: |
-          source venv/bin/activate
-          pip install -r requirements.txt
+          pip install --target ./package -r requirements.txt
 
-      # Optional: Add step to run tests here
-      
+      - name: Copy function files to package
+        run: |
+          cp function_app.py ./package/
+          cp host.json ./package/
+          cp requirements.txt ./package/
+          if [ -d "redact_resend" ]; then
+            cp -r redact_resend ./package/
+          fi
+
+      - name: Debug - List package contents
+        run: |
+          echo "Package contents:"
+          ls -la ./package/
+          echo "Package structure:"
+          find ./package -type f | head -30
+          echo "Package size:"
+          du -sh ./package/
+
+      - name: Validate package structure
+        run: |
+          echo "Checking for required files:"
+          echo "function_app.py exists: $(test -f ./package/function_app.py && echo 'YES' || echo 'NO')"
+          echo "host.json exists: $(test -f ./package/host.json && echo 'YES' || echo 'NO')"
+          echo "requirements.txt exists: $(test -f ./package/requirements.txt && echo 'YES' || echo 'NO')"
+          
+          echo "Checking file contents:"
+          echo "=== function_app.py ===" 
+          head -5 ./package/function_app.py
+          echo "=== host.json ==="
+          cat ./package/host.json
+
       - name: 'Deploy to Azure Functions'
         uses: Azure/functions-action@v1
         id: deploy-to-function
@@ -47,3 +80,4 @@ jobs:
           scm-do-build-during-deployment: false
           enable-oryx-build: false
           remote-build: false
+          
