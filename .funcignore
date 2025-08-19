@@ -1,0 +1,10 @@
+# Exclude repo noise from the deployment package
+.git/
+.github/
+.vscode/
+**/__pycache__/
+tests/
+docs/
+*.md
+*.ps1
+*.sh
