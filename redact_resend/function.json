@@ -9,7 +9,7 @@
       "methods": [
         "post"
       ],
-      "route": "redact-resend"
+      "route": "redact_resend"
     },
     {
       "type": "http",
