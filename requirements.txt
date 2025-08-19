@@ -1,0 +1,5 @@
+azure-functions
+requests
+msal
+beautifulsoup4
+lxml
