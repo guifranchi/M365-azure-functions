@@ -7,7 +7,6 @@ on:
   workflow_dispatch:
 
 env:
-  AZURE_FUNCTIONAPP_PACKAGE_PATH: './package'
   PYTHON_VERSION: '3.12'
 
 jobs:
@@ -24,60 +23,60 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Debug - List current directory contents
+      - name: Create deployment package
         run: |
-          echo "Repository contents:"
-          ls -la
-          echo "Repository structure:"
-          find . -type f -name "*.py" -o -name "*.json" -o -name "*.txt"
-
-      - name: Create package directory
-        run: mkdir -p ./package
-
-      - name: Install dependencies to package directory
-        run: |
-          pip install --target ./package -r requirements.txt
-
-      - name: Copy function files to package
-        run: |
-          cp function_app.py ./package/
-          cp host.json ./package/
-          cp requirements.txt ./package/
+          mkdir deploy
+          
+          # Copy your function files
+          cp function_app.py deploy/
+          cp host.json deploy/
+          cp requirements.txt deploy/
           if [ -d "redact_resend" ]; then
-            cp -r redact_resend ./package/
+            cp -r redact_resend deploy/
           fi
 
-      - name: Debug - List package contents
+      - name: Debug package
         run: |
-          echo "Package contents:"
-          ls -la ./package/
-          echo "Package structure:"
-          find ./package -type f | head -30
-          echo "Package size:"
-          du -sh ./package/
+          echo "Deployment package contents:"
+          ls -la deploy/
+          echo "Function app content:"
+          head -10 deploy/function_app.py
 
-      - name: Validate package structure
+      - name: Create deployment ZIP
         run: |
-          echo "Checking for required files:"
-          echo "function_app.py exists: $(test -f ./package/function_app.py && echo 'YES' || echo 'NO')"
-          echo "host.json exists: $(test -f ./package/host.json && echo 'YES' || echo 'NO')"
-          echo "requirements.txt exists: $(test -f ./package/requirements.txt && echo 'YES' || echo 'NO')"
-          
-          echo "Checking file contents:"
-          echo "=== function_app.py ===" 
-          head -5 ./package/function_app.py
-          echo "=== host.json ==="
-          cat ./package/host.json
+          cd deploy
+          zip -r ../function-app.zip . -x "*.pyc" "*/__pycache__/*"
+          cd ..
+          ls -la function-app.zip
 
-      - name: 'Deploy to Azure Functions'
-        uses: Azure/functions-action@v1
-        id: deploy-to-function
-        with:
-          app-name: 'dlp-redact-resend-func'
-          slot-name: 'production'
-          package: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
-          publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_9DFF1B7D3671481E9B08BA3B92D48BA3 }}
-          scm-do-build-during-deployment: false
-          enable-oryx-build: false
-          remote-build: false
+      - name: Azure CLI Login with Publish Profile
+        run: |
+          # Extract credentials from publish profile (this is a workaround)
+          echo "Using publish profile for authentication"
           
+      - name: Deploy using Azure REST API
+        run: |
+          # Extract the SCM URL and credentials from publish profile
+          PUBLISH_PROFILE='${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_9DFF1B7D3671481E9B08BA3B92D48BA3 }}'
+          
+          # Parse publish profile to extract SCM URL and credentials
+          SCM_URL=$(echo "$PUBLISH_PROFILE" | grep -o 'publishUrl="[^"]*\.scm\.azurewebsites\.net[^"]*"' | sed 's/publishUrl="//;s/"//' | head -1)
+          USERNAME=$(echo "$PUBLISH_PROFILE" | grep -o 'userName="[^"]*"' | sed 's/userName="//;s/"//' | head -1)
+          PASSWORD=$(echo "$PUBLISH_PROFILE" | grep -o 'userPWD="[^"]*"' | sed 's/userPWD="//;s/"//' | head -1)
+          
+          if [ -z "$SCM_URL" ] || [ -z "$USERNAME" ] || [ -z "$PASSWORD" ]; then
+            echo "Failed to parse publish profile"
+            exit 1
+          fi
+          
+          echo "SCM URL: $SCM_URL"
+          echo "Username: $USERNAME"
+          
+          # Deploy using Kudu API directly
+          curl -X POST \
+            --user "$USERNAME:$PASSWORD" \
+            --data-binary @function-app.zip \
+            -H "Content-Type: application/zip" \
+            "https://$SCM_URL/api/zipdeploy" \
+            -v
+            
